@@ -106,13 +106,18 @@
   .b-t2 { background: #FDE8F0; color: #c0185f; }
   .b-t3 { background: #E8FDE8; color: #1a7a1a; }
   .b-tft { background: #FEF3E8; color: #b85c00; }
+  .b-ceo { background: #FFF0F0; color: #b91c1c; }
   .b-me { background: #F0E8FE; color: #6b21a8; }
+  .b-news { background: #E8F5FE; color: #0369a1; }
 
   /* 개인 업무 사이드바 구분선 */
   .side-divider { height: 1px; background: #e0e0e0; margin: 6px 0; }
   .tab.me-tab { color: #6b21a8; font-size: 11px; padding: 12px 0; }
   .tab.me-tab:hover { background: #faf5ff; color: #4c1d95; }
   .tab.me-tab.on { background: #faf5ff; color: #4c1d95; border-left-color: #7c3aed; }
+  .tab.news-tab { color: #0369a1; font-size: 11px; padding: 12px 0; }
+  .tab.news-tab:hover { background: #f0f9ff; color: #0284c7; }
+  .tab.news-tab.on { background: #f0f9ff; color: #0284c7; border-left-color: #0ea5e9; }
 
   /* 모달 */
   .modal-bg { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; }
@@ -173,6 +178,8 @@
     .tab.all-tab { margin-top: 0; border-top: 2px solid transparent; }
     .tab.me-tab { font-size: 11px; padding: 10px 4px 8px; }
     .tab.me-tab.on { background: #faf5ff; border-top-color: #7c3aed; border-left-color: transparent; }
+    .tab.news-tab { font-size: 11px; padding: 10px 4px 8px; }
+    .tab.news-tab.on { background: #f0f9ff; border-top-color: #0ea5e9; border-left-color: transparent; }
 
     .io-area {
       border-top: none;
@@ -230,9 +237,11 @@
     <div class="tab" onclick="go('t2',this)">2팀</div>
     <div class="tab" onclick="go('t3',this)">3팀</div>
     <div class="tab" onclick="go('tft',this)">신규TFT</div>
+    <div class="tab" onclick="go('ceo',this)">👑 대표이사</div>
     <div class="side-divider"></div>
     <div class="side-label" style="padding-top:6px">개인</div>
     <div class="tab me-tab" onclick="go('me',this)">🙋 내 업무</div>
+    <div class="tab news-tab" onclick="go('news',this)">📰 News</div>
     <div class="tab all-tab" onclick="go('all',this)">📋 종합</div>
     <div class="io-area">
       <button class="io-btn export" onclick="openExport()">💾 내보내기</button>
@@ -264,7 +273,9 @@
         <span class="team-badge b-t2">2팀</span>
         <span class="team-badge b-t3">3팀</span>
         <span class="team-badge b-tft">신규TFT</span>
+        <span class="team-badge b-ceo">대표이사</span>
         <span class="team-badge b-me">내 업무</span>
+        <span class="team-badge b-news">News</span>
       </div>
       <span style="margin-left:auto">일자별 전체 현황</span>
     </div>
@@ -309,11 +320,11 @@
 <div class="toast" id="toast"></div>
 
 <script>
-var team='t1', db={t1:[],t2:[],t3:[],tft:[],me:[]}, editId=null, editTeam=null;
+var team='t1', db={t1:[],t2:[],t3:[],tft:[],ceo:[],me:[],news:[]}, editId=null, editTeam=null;
 var pendingFiles=[]; // 등록 전 첨부파일 [{name,type,data}]
 var editPendingFiles=[]; // 수정 중 추가 파일
-var TNAMES={t1:'1팀',t2:'2팀',t3:'3팀',tft:'신규TFT',me:'내 업무'};
-var TBADGE={t1:'b-t1',t2:'b-t2',t3:'b-t3',tft:'b-tft',me:'b-me'};
+var TNAMES={t1:'1팀',t2:'2팀',t3:'3팀',tft:'신규TFT',ceo:'대표이사',me:'내 업무',news:'News'};
+var TBADGE={t1:'b-t1',t2:'b-t2',t3:'b-t3',tft:'b-tft',ceo:'b-ceo',me:'b-me',news:'b-news'};
 var KEY='team_notes_db';
 
 /* Firebase 변수 (window.onload에서 초기화) */
@@ -349,7 +360,7 @@ function persist(){
 
 function load(){
   try{var j=localStorage.getItem(KEY);if(j)db=JSON.parse(j);}catch(e){}
-  ['t1','t2','t3','tft','me'].forEach(function(t){if(!db[t])db[t]=[];});
+  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){if(!db[t])db[t]=[];});
   draw();
 }
 
@@ -575,7 +586,7 @@ function rowHTML(it, t){
 
 function drawAll(){
   var el=document.getElementById('cols');
-  var TEAM_ORDER=['t1','t2','t3','tft','me'];
+  var TEAM_ORDER=['t1','t2','t3','tft','ceo','me','news'];
 
   // 날짜별 + 팀별로 분류
   var dayMap={}, dayKeys=[];
@@ -583,7 +594,7 @@ function drawAll(){
     (db[t]||[]).forEach(function(it){
       var k=dk(it.id);
       if(!dayMap[k]){
-        dayMap[k]={lbl:fd(it.id), byTeam:{t1:[],t2:[],t3:[],tft:[],me:[]}};
+        dayMap[k]={lbl:fd(it.id), byTeam:{t1:[],t2:[],t3:[],tft:[],ceo:[],me:[],news:[]}};
         dayKeys.push(k);
       }
       dayMap[k].byTeam[t].push(it);
@@ -708,8 +719,8 @@ function doImportFile(e){
   reader.onload=function(ev){
     try{
       var p=JSON.parse(ev.target.result);
-      if(p.t1!==undefined||p.t2!==undefined||p.t3!==undefined||p.tft!==undefined||p.me!==undefined){
-        db=p; ['t1','t2','t3','tft','me'].forEach(function(t){if(!db[t])db[t]=[];});
+      if(p.t1!==undefined||p.t2!==undefined||p.t3!==undefined||p.tft!==undefined||p.me!==undefined||p.ceo!==undefined||p.news!==undefined){
+        db=p; ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){if(!db[t])db[t]=[];});
         persist(); draw(); closeImport(); toast('✅ 데이터를 불러왔습니다');
       } else { toast('올바른 데이터 파일이 아닙니다'); }
     }catch(err){ toast('파일을 읽을 수 없습니다'); }
@@ -736,7 +747,7 @@ window.addEventListener('load', function(){
     var val = snap.val();
     if(val){
       db = val;
-      ['t1','t2','t3','tft','me'].forEach(function(t){ if(!db[t]) db[t]=[]; });
+      ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){ if(!db[t]) db[t]=[]; });
       try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
       draw();
     }
