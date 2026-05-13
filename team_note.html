@@ -329,6 +329,7 @@ var KEY='team_notes_db';
 
 /* Firebase 변수 (window.onload에서 초기화) */
 var fbDB = null, fbRef = null;
+var skipFbUpdate = false;
 var firebaseConfig = {
   apiKey: "AIzaSyCoO8uJzq47wzfGP7QeWlqTESrN5PpMW_o",
   authDomain: "division-1-994b2.firebaseapp.com",
@@ -352,9 +353,10 @@ function persist(){
   setSyncStatus('ing');
   try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
   if(fbRef){
+    skipFbUpdate = true;
     fbRef.set(db)
-      .then(function(){ setSyncStatus('ok'); })
-      .catch(function(e){ setSyncStatus('err'); toast('⚠️ 저장 실패: '+e.message); });
+      .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipFbUpdate=false; }, 1000); })
+      .catch(function(e){ setSyncStatus('err'); skipFbUpdate=false; toast('⚠️ 저장 실패: '+e.message); });
   }
 }
 
@@ -744,6 +746,7 @@ window.addEventListener('load', function(){
   });
 
   fbRef.on('value', function(snap){
+    if(skipFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
     if(val){
       db = val;
