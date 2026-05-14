@@ -329,6 +329,7 @@ var KEY='team_notes_db';
 
 /* Firebase 변수 (window.onload에서 초기화) */
 var fbDB = null, fbRef = null;
+var skipFbUpdate = false;
 var firebaseConfig = {
   apiKey: "AIzaSyCoO8uJzq47wzfGP7QeWlqTESrN5PpMW_o",
   authDomain: "division-1-994b2.firebaseapp.com",
@@ -352,9 +353,10 @@ function persist(){
   setSyncStatus('ing');
   try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
   if(fbRef){
+    skipFbUpdate = true;
     fbRef.set(db)
-      .then(function(){ setSyncStatus('ok'); })
-      .catch(function(e){ setSyncStatus('err'); toast('⚠️ 저장 실패: '+e.message); });
+      .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipFbUpdate=false; }, 1000); })
+      .catch(function(e){ setSyncStatus('err'); skipFbUpdate=false; toast('⚠️ 저장 실패: '+e.message); });
   }
 }
 
@@ -495,6 +497,13 @@ function removeEditPending(i){ editPendingFiles.splice(i,1); renderEditPreview()
 
 /* ── 유틸 ── */
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+function linkify(s){
+  return esc(s).replace(/(https?:\/\/[^\s<>"]+)/g, function(url){
+    return '<a href="'+url+'" target="_blank" rel="noopener noreferrer" '
+      +'style="color:#1a56db;text-decoration:underline;word-break:break-all;" '
+      +'onclick="event.stopPropagation()">'+url+'</a>';
+  });
+}
 function autoH(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,100)+'px';}
 function handleKey(e){
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();add();}
@@ -546,6 +555,7 @@ function draw(){
 
 function rowHTML(it, t){
   var safe=esc(it.t);
+  var linked=linkify(it.t);
   if(editId===it.id){
     return '<div class="row">'
       +'<div class="edit-box drop-zone" id="edit-drop-zone"'
@@ -575,7 +585,7 @@ function rowHTML(it, t){
     filesHTML+='</div>';
   }
   return '<div class="row">'
-    +'<div class="row-top"><span class="text">'+safe+'</span>'
+    +'<div class="row-top"><span class="text">'+linked+'</span>'
     +'<div class="acts">'
     +'<button onclick="startEdit('+it.id+',\''+t+'\')">✏️</button>'
     +'<button onclick="del('+it.id+',\''+t+'\')">🗑</button>'
@@ -623,7 +633,6 @@ function drawAll(){
       // 항목 (입력 순서대로)
       items.sort(function(a,b){return a.id-b.id;});
       items.forEach(function(it){
-        var safe=esc(it.t);
         var filesHTML='';
         if(it.files&&it.files.length){
           filesHTML='<div class="file-list">';
@@ -636,7 +645,7 @@ function drawAll(){
           filesHTML+='</div>';
         }
         html+='<div class="row">'
-          +'<div class="row-top"><span class="text">'+safe+'</span></div>'
+          +'<div class="row-top"><span class="text">'+linkify(it.t)+'</span></div>'
           +filesHTML+'</div>';
       });
     });
@@ -744,6 +753,7 @@ window.addEventListener('load', function(){
   });
 
   fbRef.on('value', function(snap){
+    if(skipFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
     if(val){
       db = val;
