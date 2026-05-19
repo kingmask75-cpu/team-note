@@ -529,12 +529,42 @@ function retrySync(){
   }
 }
 
+/* Firebase 전송용 db 복사본 생성 - 파일 data(base64) 제거, 이름/타입만 유지 */
+function dbForFirebase() {
+  var copy = {};
+  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){
+    copy[t] = (db[t]||[]).map(function(it){
+      var entry = {id: it.id, t: it.t};
+      if(it.files && it.files.length){
+        entry.files = it.files.map(function(f){
+          return {name: f.name, type: f.type}; /* data(base64) 제외 */
+        });
+      }
+      return entry;
+    });
+  });
+  return copy;
+}
+
+/* 로컬 파일 데이터를 Firebase에서 받은 항목에 병합 */
+function mergeLocalFiles(fbDb) {
+  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){
+    (fbDb[t]||[]).forEach(function(fbItem){
+      var localArr = db[t]||[];
+      var localItem = localArr.find(function(x){ return x.id===fbItem.id; });
+      if(localItem && localItem.files) {
+        fbItem.files = localItem.files; /* 로컬 파일 데이터 복원 */
+      }
+    });
+  });
+}
+
 function persist(){
   setSyncStatus('ing');
   try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
   if(fbRef){
     skipFbUpdate = true;
-    fbRef.set(db)
+    fbRef.set(dbForFirebase())
       .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipFbUpdate=false; }, 1000); })
       .catch(function(e){
         setSyncStatus('err'); skipFbUpdate=false;
@@ -566,7 +596,12 @@ function fileIcon(type, name){
 }
 
 /* ── 파일 → base64 ── */
+var MAX_FILE_MB = 5;
 function readFile(file, cb){
+  if(file.size > MAX_FILE_MB * 1024 * 1024){
+    toast('⚠️ '+file.name+' 파일이 '+MAX_FILE_MB+'MB를 초과합니다 (첨부 불가)');
+    return;
+  }
   var r=new FileReader();
   r.onload=function(e){ cb({name:file.name, type:file.type, data:e.target.result}); };
   r.readAsDataURL(file);
@@ -1250,7 +1285,9 @@ window.addEventListener('load', function(){
     if(skipFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
     if(val){
-      db = fixDbArrays(val);
+      var incoming = fixDbArrays(val);
+      mergeLocalFiles(incoming); /* 로컬 파일 데이터 병합 */
+      db = incoming;
       try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
       draw();
     }
