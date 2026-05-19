@@ -331,6 +331,7 @@
         <div class="sync-dot ing" id="syncDot"></div>
         <span id="syncTxt">연결중</span>
       </div>
+      <button class="io-btn" id="retryBtn" onclick="retrySync()" style="display:none;background:#fff3cd;border-color:#ffc107;color:#856404;font-size:10px">🔄 재연결</button>
     </div>
   </div>
   <div class="body">
@@ -503,9 +504,29 @@ var firebaseConfig = {
 function setSyncStatus(state){
   var dot=document.getElementById('syncDot');
   var txt=document.getElementById('syncTxt');
+  var btn=document.getElementById('retryBtn');
   if(!dot) return;
   dot.className='sync-dot '+state;
   txt.textContent = state==='ok'?'동기화됨': state==='err'?'오프라인':'연결중';
+  if(btn) btn.style.display = state==='err' ? 'block' : 'none';
+}
+
+function retrySync(){
+  setSyncStatus('ing');
+  if(fbRef) {
+    fbRef.once('value').then(function(snap){
+      var val=snap.val();
+      if(val){ db=fixDbArrays(val); try{localStorage.setItem(KEY,JSON.stringify(db));}catch(e){} draw(); }
+      setSyncStatus('ok');
+      toast('✅ 동기화 완료');
+    }).catch(function(e){ setSyncStatus('err'); toast('⚠️ 연결 실패: '+e.message); });
+  }
+  if(fbCalRef) {
+    fbCalRef.once('value').then(function(snap){
+      var val=snap.val();
+      if(val){ calEvents=fixCalArrays(val); drawCal(); }
+    }).catch(function(){});
+  }
 }
 
 function persist(){
@@ -515,12 +536,18 @@ function persist(){
     skipFbUpdate = true;
     fbRef.set(db)
       .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipFbUpdate=false; }, 1000); })
-      .catch(function(e){ setSyncStatus('err'); skipFbUpdate=false; toast('⚠️ 저장 실패: '+e.message); });
+      .catch(function(e){
+        setSyncStatus('err'); skipFbUpdate=false;
+        toast('⚠️ 저장 실패: '+e.message);
+        console.error('Firebase persist error:', e);
+      });
+  } else {
+    setSyncStatus('err');
   }
 }
 
 function load(){
-  try{var j=localStorage.getItem(KEY);if(j)db=JSON.parse(j);}catch(e){}
+  try{var j=localStorage.getItem(KEY);if(j)db=fixDbArrays(JSON.parse(j));}catch(e){}
   ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){if(!db[t])db[t]=[];});
   draw();
 }
@@ -692,7 +719,6 @@ function downloadFile(itId, fi, t){
 /* ── 화면 렌더 ── */
 function draw(){
   if(team==='all'){drawAll();return;}
-  if(team==='cal'){return;}  /* 캘린더 탭일 때는 팀노트 draw 건너뜀 */
   var el=document.getElementById('cols');
   var arr=db[team];
   if(!arr.length){el.innerHTML='<div class="none">내용을 입력해보세요</div>';return;}
@@ -911,6 +937,37 @@ var calMonth = new Date().getMonth(); // 0-indexed
 var calEvents = {}; // { 'YYYY-MM-DD': [{id, title, start, end, team, desc}] }
 var evModalDate = null;
 var fbCalRef = null;
+var skipCalFbUpdate = false;
+
+/* Firebase가 배열을 객체로 변환하는 문제 보정 */
+function toArray(val) {
+  if(!val) return [];
+  if(Array.isArray(val)) return val.filter(Boolean);
+  if(typeof val === 'object') {
+    var arr = [];
+    Object.keys(val).sort(function(a,b){return a-b;}).forEach(function(k){ if(val[k]) arr.push(val[k]); });
+    return arr;
+  }
+  return [];
+}
+
+function fixDbArrays(obj) {
+  if(!obj || typeof obj !== 'object') return {t1:[],t2:[],t3:[],tft:[],ceo:[],me:[],news:[]};
+  var result = {};
+  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){
+    result[t] = toArray(obj[t]);
+  });
+  return result;
+}
+
+function fixCalArrays(obj) {
+  if(!obj || typeof obj !== 'object') return {};
+  var result = {};
+  Object.keys(obj).forEach(function(dateKey) {
+    result[dateKey] = toArray(obj[dateKey]);
+  });
+  return result;
+}
 
 var CHIP_CLASS = { t1:'chip-t1', t2:'chip-t2', t3:'chip-t3', tft:'chip-tft', ceo:'chip-ceo', me:'chip-me', all:'chip-all', news:'chip-all' };
 var TEAM_LABEL_CAL = { all:'전체', t1:'1팀', t2:'2팀', t3:'3팀', tft:'신규TFT', ceo:'대표이사', me:'내 업무' };
@@ -1142,16 +1199,18 @@ function evDel(evId) {
 }
 
 function persistCal() {
+  setSyncStatus('ing');
   try{ localStorage.setItem('team_calendar_db', JSON.stringify(calEvents)); }catch(e){}
   if(fbCalRef) {
+    skipCalFbUpdate = true;
     fbCalRef.set(calEvents)
-      .then(function(){ setSyncStatus('ok'); })
-      .catch(function(e){ setSyncStatus('err'); toast('⚠️ 캘린더 저장 실패: '+e.message); });
+      .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipCalFbUpdate=false; }, 1000); })
+      .catch(function(e){ setSyncStatus('err'); skipCalFbUpdate=false; toast('⚠️ 캘린더 저장 실패: '+e.message); });
   }
 }
 
 function loadCal() {
-  try{ var j=localStorage.getItem('team_calendar_db'); if(j) calEvents=JSON.parse(j); }catch(e){}
+  try{ var j=localStorage.getItem('team_calendar_db'); if(j) calEvents=fixCalArrays(JSON.parse(j)); }catch(e){}
 }
 
 loadCal();
@@ -1171,8 +1230,14 @@ window.addEventListener('load', function(){
   /* 캘린더 Firebase 동기화 */
   fbCalRef = fbDB.ref('teamcalendar');
   fbCalRef.on('value', function(snap){
+    if(skipCalFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
-    if(val){ calEvents = val; try{ localStorage.setItem('team_calendar_db', JSON.stringify(calEvents)); }catch(e){} drawCal(); }
+    if(val){
+      calEvents = fixCalArrays(val);
+      try{ localStorage.setItem('team_calendar_db', JSON.stringify(calEvents)); }catch(e){}
+      drawCal();
+      if(evModalDate) renderEvList();
+    }
     setSyncStatus('ok');
   }, function(){ setSyncStatus('err'); });
 
@@ -1185,13 +1250,12 @@ window.addEventListener('load', function(){
     if(skipFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
     if(val){
-      db = val;
-      ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){ if(!db[t]) db[t]=[]; });
+      db = fixDbArrays(val);
       try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
       draw();
     }
     setSyncStatus('ok');
-  }, function(){ setSyncStatus('err'); });
+  }, function(e){ setSyncStatus('err'); console.error('FB notes error:', e); });
 });
 </script>
 </body>
