@@ -692,6 +692,7 @@ function downloadFile(itId, fi, t){
 /* ── 화면 렌더 ── */
 function draw(){
   if(team==='all'){drawAll();return;}
+  if(team==='cal'){return;}  /* 캘린더 탭일 때는 팀노트 draw 건너뜀 */
   var el=document.getElementById('cols');
   var arr=db[team];
   if(!arr.length){el.innerHTML='<div class="none">내용을 입력해보세요</div>';return;}
