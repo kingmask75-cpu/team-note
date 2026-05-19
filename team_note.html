@@ -204,9 +204,17 @@
   .ev-item-acts button:hover { background: #f0f0f0; color: #333; }
   .ev-add-btn { background: #111; color: #fff; border: none; border-radius: 8px; padding: 9px 0; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; }
   .ev-add-btn:hover { background: #333; }
+  .ev-add-btn.edit-mode { background: #1a56db; }
+  .ev-add-btn.edit-mode:hover { background: #1447c0; }
+  .ev-cancel-btn { background: #f5f5f5; color: #555; border: 1px solid #ddd; border-radius: 8px; padding: 9px 0; font-size: 13px; font-weight: 600; cursor: pointer; width: 100%; }
+  .ev-cancel-btn:hover { background: #eee; }
   .ev-no-events { font-size: 13px; color: #ccc; text-align: center; padding: 12px 0; }
   .ev-sep { height: 1px; background: #f0f0f0; margin: 2px 0; }
   .ev-section-title { font-size: 11px; font-weight: 700; color: #aaa; margin-bottom: 4px; }
+  .time-select-wrap { display: flex; gap: 4px; align-items: center; }
+  .time-select-wrap select { flex: 1; padding: 8px 4px; border: 1px solid #ddd; border-radius: 7px; font-size: 12px; font-family: sans-serif; background: #fff; -webkit-appearance: none; appearance: none; text-align: center; }
+  .time-select-wrap select:focus { outline: none; border-color: #5599ff; }
+  .ev-item.editing { border-color: #5599ff; background: #f0f6ff; }
 
   @media (max-width: 640px) {
     .cal-cell { min-height: 58px; padding: 4px 3px 3px; }
@@ -384,18 +392,26 @@
     <h3 id="ev-modal-title">📅 일정</h3>
     <div class="ev-date-lbl" id="ev-date-lbl"></div>
 
-    <!-- 등록 폼 -->
+    <!-- 등록/수정 폼 -->
     <div class="ev-form" id="ev-form">
-      <label>제목 *</label>
+      <label id="ev-form-label">제목 *</label>
       <input type="text" id="ev-title-inp" placeholder="미팅/회의 제목" />
       <div class="row2">
         <div style="flex:1;display:flex;flex-direction:column;gap:4px">
           <label>시작 시간</label>
-          <input type="time" id="ev-start-inp" />
+          <div class="time-select-wrap">
+            <select id="ev-start-ampm"><option value="AM">오전</option><option value="PM">오후</option></select>
+            <select id="ev-start-h"></select>
+            <select id="ev-start-m"></select>
+          </div>
         </div>
         <div style="flex:1;display:flex;flex-direction:column;gap:4px">
           <label>종료 시간</label>
-          <input type="time" id="ev-end-inp" />
+          <div class="time-select-wrap">
+            <select id="ev-end-ampm"><option value="AM">오전</option><option value="PM">오후</option></select>
+            <select id="ev-end-h"></select>
+            <select id="ev-end-m"></select>
+          </div>
         </div>
       </div>
       <label>팀</label>
@@ -410,7 +426,9 @@
       </select>
       <label>내용 (선택)</label>
       <textarea id="ev-desc-inp" placeholder="장소, 안건, 참석자 등"></textarea>
-      <button class="ev-add-btn" onclick="evSave()">등록</button>
+      <input type="hidden" id="ev-edit-id" value="" />
+      <button class="ev-add-btn" id="ev-save-btn" onclick="evSave()">등록</button>
+      <button class="ev-cancel-btn" id="ev-cancel-edit-btn" onclick="evCancelEdit()" style="display:none">취소</button>
     </div>
 
     <div class="ev-sep"></div>
@@ -946,11 +964,7 @@ function openEvModal(dateKey) {
   var dateStr = parts[0]+'년 '+parseInt(parts[1])+'월 '+parseInt(parts[2])+'일';
   document.getElementById('ev-modal-title').textContent = '📅 ' + dateStr;
   document.getElementById('ev-date-lbl').textContent = '';
-  document.getElementById('ev-title-inp').value = '';
-  document.getElementById('ev-start-inp').value = '';
-  document.getElementById('ev-end-inp').value = '';
-  document.getElementById('ev-team-inp').value = 'all';
-  document.getElementById('ev-desc-inp').value = '';
+  evCancelEdit();
   renderEvList();
   document.getElementById('evModal').classList.add('show');
   setTimeout(function(){ document.getElementById('ev-title-inp').focus(); }, 100);
@@ -958,15 +972,105 @@ function openEvModal(dateKey) {
 
 function closeEvModal() { document.getElementById('evModal').classList.remove('show'); evModalDate=null; }
 
-function renderEvList() {
+/* ── 시간 셀렉트 초기화 ── */
+function initTimeSelects() {
+  ['ev-start-h','ev-end-h'].forEach(function(id){
+    var el = document.getElementById(id); if(!el) return;
+    el.innerHTML = '<option value="">--</option>';
+    for(var h=1;h<=12;h++) el.innerHTML += '<option value="'+h+'">'+h+'시</option>';
+  });
+  ['ev-start-m','ev-end-m'].forEach(function(id){
+    var el = document.getElementById(id); if(!el) return;
+    el.innerHTML = '<option value="">--</option>';
+    for(var m=0;m<60;m+=10) el.innerHTML += '<option value="'+(m<10?'0':'')+m+'">'+(m<10?'0':'')+m+'분</option>';
+  });
+}
+
+/* 24h HH:MM → {ampm, h, m} */
+function parse24h(str) {
+  if(!str) return {ampm:'AM', h:'', m:''};
+  var parts = str.split(':');
+  var hh = parseInt(parts[0]), mm = parts[1]||'00';
+  var ampm = hh < 12 ? 'AM' : 'PM';
+  var h12 = hh % 12; if(h12===0) h12=12;
+  return {ampm: ampm, h: String(h12), m: mm};
+}
+
+/* 오전/오후 + h + m → 24h HH:MM */
+function to24h(ampm, h, m) {
+  if(!h) return '';
+  var hh = parseInt(h);
+  if(ampm==='PM' && hh!==12) hh += 12;
+  if(ampm==='AM' && hh===12) hh = 0;
+  return (hh<10?'0':'')+hh+':'+(m||'00');
+}
+
+/* 24h HH:MM → 오전/오후 표시 문자열 */
+function fmtTime(str) {
+  if(!str) return '';
+  var p = parse24h(str);
+  if(!p.h) return '';
+  return (p.ampm==='AM'?'오전':'오후')+' '+p.h+':'+p.m;
+}
+
+function setTimeSelects(prefix, str) {
+  var p = parse24h(str);
+  document.getElementById(prefix+'-ampm').value = p.ampm;
+  document.getElementById(prefix+'-h').value = p.h;
+  document.getElementById(prefix+'-m').value = p.m;
+}
+
+function getTimeVal(prefix) {
+  var ampm = document.getElementById(prefix+'-ampm').value;
+  var h = document.getElementById(prefix+'-h').value;
+  var m = document.getElementById(prefix+'-m').value;
+  return to24h(ampm, h, m);
+}
+
+function resetForm() {
+  document.getElementById('ev-title-inp').value = '';
+  document.getElementById('ev-team-inp').value = 'all';
+  document.getElementById('ev-desc-inp').value = '';
+  document.getElementById('ev-edit-id').value = '';
+  setTimeSelects('ev-start', '');
+  setTimeSelects('ev-end', '');
+  document.getElementById('ev-save-btn').textContent = '등록';
+  document.getElementById('ev-save-btn').classList.remove('edit-mode');
+  document.getElementById('ev-cancel-edit-btn').style.display = 'none';
+  document.getElementById('ev-form-label').textContent = '제목 *';
+}
+
+function evCancelEdit() { resetForm(); renderEvList(); }
+
+function evEdit(evId) {
+  var evs = calEvents[evModalDate] || [];
+  var ev = evs.find(function(e){ return e.id === evId; });
+  if(!ev) return;
+  document.getElementById('ev-title-inp').value = ev.title;
+  document.getElementById('ev-team-inp').value = ev.team || 'all';
+  document.getElementById('ev-desc-inp').value = ev.desc || '';
+  document.getElementById('ev-edit-id').value = ev.id;
+  setTimeSelects('ev-start', ev.start || '');
+  setTimeSelects('ev-end', ev.end || '');
+  document.getElementById('ev-save-btn').textContent = '수정 저장';
+  document.getElementById('ev-save-btn').classList.add('edit-mode');
+  document.getElementById('ev-cancel-edit-btn').style.display = 'block';
+  document.getElementById('ev-form-label').textContent = '제목 * (수정 중)';
+  document.getElementById('ev-title-inp').focus();
+  renderEvList(evId);
+}
+
+function renderEvList(highlightId) {
   var el = document.getElementById('ev-list');
   var evs = (calEvents[evModalDate] || []).slice().sort(function(a,b){ return (a.start||'').localeCompare(b.start||''); });
   if(!evs.length){ el.innerHTML='<div class="ev-no-events">등록된 일정이 없습니다</div>'; return; }
   el.innerHTML = evs.map(function(ev) {
-    var cc = CHIP_CLASS[ev.team] || 'chip-all';
     var tLabel = TEAM_LABEL_CAL[ev.team] || ev.team;
-    var timeStr = ev.start ? (ev.end ? ev.start+'~'+ev.end : ev.start) : '';
-    return '<div class="ev-item">'
+    var startFmt = fmtTime(ev.start);
+    var endFmt = fmtTime(ev.end);
+    var timeStr = startFmt ? (endFmt ? startFmt+' ~ '+endFmt : startFmt) : '';
+    var isEditing = (ev.id === highlightId);
+    return '<div class="ev-item'+(isEditing?' editing':'')+'">'
       +'<div class="ev-item-info">'
       +'<span class="team-badge '+TBADGE[ev.team]+'" style="font-size:10px;margin-bottom:3px;display:inline-block">'+tLabel+'</span> '
       +'<span class="ev-item-title">'+esc(ev.title)+'</span>'
@@ -974,6 +1078,7 @@ function renderEvList() {
       +(ev.desc?'<div class="ev-item-desc">'+esc(ev.desc)+'</div>':'')
       +'</div>'
       +'<div class="ev-item-acts">'
+      +'<button onclick="evEdit(\''+ev.id+'\')" title="수정">✏️</button>'
       +'<button onclick="evDel(\''+ev.id+'\')" title="삭제">🗑️</button>'
       +'</div>'
       +'</div>';
@@ -983,24 +1088,44 @@ function renderEvList() {
 function evSave() {
   var title = document.getElementById('ev-title-inp').value.trim();
   if(!title){ alert('제목을 입력하세요'); return; }
-  var ev = {
-    id: Date.now() + '',
-    title: title,
-    start: document.getElementById('ev-start-inp').value,
-    end: document.getElementById('ev-end-inp').value,
-    team: document.getElementById('ev-team-inp').value,
-    desc: document.getElementById('ev-desc-inp').value.trim()
-  };
-  if(!calEvents[evModalDate]) calEvents[evModalDate] = [];
-  calEvents[evModalDate].push(ev);
-  persistCal();
-  document.getElementById('ev-title-inp').value = '';
-  document.getElementById('ev-desc-inp').value = '';
-  document.getElementById('ev-start-inp').value = '';
-  document.getElementById('ev-end-inp').value = '';
-  renderEvList();
-  drawCal();
-  toast('✅ 일정이 등록되었습니다');
+  var editId = document.getElementById('ev-edit-id').value;
+  var startVal = getTimeVal('ev-start');
+  var endVal = getTimeVal('ev-end');
+
+  if(editId) {
+    /* 수정 모드 */
+    var evs = calEvents[evModalDate] || [];
+    var idx = evs.findIndex(function(e){ return e.id === editId; });
+    if(idx >= 0) {
+      evs[idx].title = title;
+      evs[idx].start = startVal;
+      evs[idx].end = endVal;
+      evs[idx].team = document.getElementById('ev-team-inp').value;
+      evs[idx].desc = document.getElementById('ev-desc-inp').value.trim();
+    }
+    persistCal();
+    resetForm();
+    renderEvList();
+    drawCal();
+    toast('✅ 일정이 수정되었습니다');
+  } else {
+    /* 등록 모드 */
+    var ev = {
+      id: Date.now() + '',
+      title: title,
+      start: startVal,
+      end: endVal,
+      team: document.getElementById('ev-team-inp').value,
+      desc: document.getElementById('ev-desc-inp').value.trim()
+    };
+    if(!calEvents[evModalDate]) calEvents[evModalDate] = [];
+    calEvents[evModalDate].push(ev);
+    persistCal();
+    resetForm();
+    renderEvList();
+    drawCal();
+    toast('✅ 일정이 등록되었습니다');
+  }
 }
 
 function evDel(evId) {
@@ -1009,6 +1134,7 @@ function evDel(evId) {
     calEvents[evModalDate] = calEvents[evModalDate].filter(function(e){ return e.id !== evId; });
     if(!calEvents[evModalDate].length) delete calEvents[evModalDate];
   }
+  if(document.getElementById('ev-edit-id').value === evId) resetForm();
   persistCal();
   renderEvList();
   drawCal();
@@ -1028,6 +1154,7 @@ function loadCal() {
 }
 
 loadCal();
+initTimeSelects();
 
 load();
 </script>
