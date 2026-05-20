@@ -348,7 +348,7 @@
       <div class="attach-preview" id="addPreview"></div>
       <input type="file" id="fi" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.hwp" onchange="onFileAdd(event)">
     </div>
-    <div id="hint-area" class="hint">Enter 등록 &nbsp;·&nbsp; Shift+Enter 줄바꿈 &nbsp;·&nbsp; 📎 파일 첨부 또는 드래그 앤 드롭</div>
+    <div id="hint-area" class="hint">Enter 등록 &nbsp;·&nbsp; Shift+Enter 줄바꿈 &nbsp;·&nbsp; 📎 파일 첨부 또는 드래그 앤 드롭 &nbsp;<span style="color:#f59e0b;font-weight:600">(최대 300KB)</span></div>
     <div id="all-header" class="all-header" style="display:none">
       <div class="legend">
         <span class="team-badge b-t1">1팀</span>
@@ -529,46 +529,16 @@ function retrySync(){
   }
 }
 
-/* Firebase 전송용 db 복사본 생성 - 파일 data(base64) 제거, 이름/타입만 유지 */
-function dbForFirebase() {
-  var copy = {};
-  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){
-    copy[t] = (db[t]||[]).map(function(it){
-      var entry = {id: it.id, t: it.t};
-      if(it.files && it.files.length){
-        entry.files = it.files.map(function(f){
-          return {name: f.name, type: f.type}; /* data(base64) 제외 */
-        });
-      }
-      return entry;
-    });
-  });
-  return copy;
-}
-
-/* 로컬 파일 데이터를 Firebase에서 받은 항목에 병합 */
-function mergeLocalFiles(fbDb) {
-  ['t1','t2','t3','tft','ceo','me','news'].forEach(function(t){
-    (fbDb[t]||[]).forEach(function(fbItem){
-      var localArr = db[t]||[];
-      var localItem = localArr.find(function(x){ return x.id===fbItem.id; });
-      if(localItem && localItem.files) {
-        fbItem.files = localItem.files; /* 로컬 파일 데이터 복원 */
-      }
-    });
-  });
-}
-
 function persist(){
   setSyncStatus('ing');
   try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
   if(fbRef){
     skipFbUpdate = true;
-    fbRef.set(dbForFirebase())
+    fbRef.set(db)
       .then(function(){ setSyncStatus('ok'); setTimeout(function(){ skipFbUpdate=false; }, 1000); })
       .catch(function(e){
         setSyncStatus('err'); skipFbUpdate=false;
-        toast('⚠️ 저장 실패: '+e.message);
+        toast('⚠️ 저장 실패: 파일 용량이 너무 클 수 있습니다');
         console.error('Firebase persist error:', e);
       });
   } else {
@@ -596,15 +566,20 @@ function fileIcon(type, name){
 }
 
 /* ── 파일 → base64 ── */
-var MAX_FILE_MB = 5;
+var MAX_FILE_KB = 300;
 function readFile(file, cb){
-  if(file.size > MAX_FILE_MB * 1024 * 1024){
-    toast('⚠️ '+file.name+' 파일이 '+MAX_FILE_MB+'MB를 초과합니다 (첨부 불가)');
+  var sizeKB = Math.round(file.size / 1024);
+  if(file.size > MAX_FILE_KB * 1024){
+    showFileSizeError(file.name, sizeKB);
     return;
   }
   var r=new FileReader();
   r.onload=function(e){ cb({name:file.name, type:file.type, data:e.target.result}); };
   r.readAsDataURL(file);
+}
+
+function showFileSizeError(name, sizeKB) {
+  toast('🚫 용량 초과: '+name+' ('+sizeKB+'KB) — 최대 '+MAX_FILE_KB+'KB까지 첨부 가능합니다');
 }
 
 /* ── 드래그 앤 드롭 ── */
@@ -1285,9 +1260,7 @@ window.addEventListener('load', function(){
     if(skipFbUpdate){ setSyncStatus('ok'); return; }
     var val = snap.val();
     if(val){
-      var incoming = fixDbArrays(val);
-      mergeLocalFiles(incoming); /* 로컬 파일 데이터 병합 */
-      db = incoming;
+      db = fixDbArrays(val);
       try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){}
       draw();
     }
